@@ -1,0 +1,74 @@
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model Project {
+  id        String    @id @default(uuid())
+  name      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  stories   Story[]
+  assets    Asset[]
+}
+
+model Story {
+  id          String    @id @default(uuid())
+  title       String
+  description String?
+  projectId   String
+  project     Project   @relation(fields: [projectId], references: [id])
+  scenes      Scene[]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  selectedCharacter String? // ID of selected character asset
+  selectedObject    String? // ID of selected object asset
+  selectedBackground String? // ID of selected background asset
+}
+
+model Scene {
+  id          String    @id @default(uuid())
+  description String
+  imageUrl    String?
+  storyId     String
+  story       Story     @relation(fields: [storyId], references: [id])
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model Asset {
+  id            String    @id @default(uuid())
+  name          String
+  type          String // e.g., "CHARACTER", "OBJECT", "BACKGROUND"
+  imageUrl      String?
+  triggerWord   String?
+  category      String?
+  status        String?
+  userLoraId    String?
+  isLiked       Boolean @default(false)
+  isFavorite    Boolean @default(false)
+  projectId     String
+  project       Project @relation(fields: [projectId], references: [id])
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  likes         Like[]
+  favorites     Favorite[]
+}
+
+model Like {
+  id        String   @id @default(uuid())
+  assetId   String
+  asset     Asset    @relation(fields: [assetId], references: [id])
+  createdAt DateTime @default(now())
+}
+
+model Favorite {
+  id        String   @id @default(uuid())
+  assetId   String
+  asset     Asset    @relation(fields: [assetId], references: [id])
+  createdAt DateTime @default(now())
+} 

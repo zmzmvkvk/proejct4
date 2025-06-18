@@ -1,0 +1,8 @@
+# 환경 변수 및 민감 정보
+.env
+server/firebase-service-account-key.json
+
+# Node.js 모듈
+node_modules/
+client/node_modules/
+server/node_modules/
