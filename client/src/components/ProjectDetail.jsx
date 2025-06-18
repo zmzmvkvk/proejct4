@@ -50,15 +50,17 @@ const ProjectDetail = () => {
         throw new Error("학습된 에셋을 가져오는데 실패했습니다.");
       }
       const data = await response.json();
+      console.log("서버에서 받은 데이터:", data);
       const assets = data.map((element) => ({
         id: element.id,
         name: element.name,
         triggerWord: element.instancePrompt,
-        category: element.loraFocus,
+        category: element.focus, // "Character", "Object", "Style"
         status: element.status,
-        imageUrl: element.urlImage ? element.urlImage : null,
+        imageUrl: element.thumbnailUrl || null,
         isFavorite: false,
         userLoraId: element.id,
+        description: element.description,
       }));
       setTrainedAssets(assets);
       setAssetsError(null);
@@ -368,7 +370,7 @@ const ProjectDetail = () => {
             />
             {/* 학습된 모든 에셋 목록 */}
             <TrainedAssetList
-              trainedAssets={trainedAssets}
+              assets={trainedAssets}
               loading={loadingAssets}
               error={assetsError}
               handleToggleLike={handleToggleLike}

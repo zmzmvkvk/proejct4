@@ -18,7 +18,7 @@ const TrainedAssetList = ({
     : assets.filter((asset) => {
         if (filter === "all") return true;
         if (filter === "favorite") return asset.isFavorite;
-        return asset.category?.toLowerCase() === filter.toLowerCase();
+        return asset.lora_focus?.toLowerCase() === filter.toLowerCase();
       });
 
   if (simple) {
@@ -43,9 +43,9 @@ const TrainedAssetList = ({
                     : "hover:scale-105 hover:shadow-xl"
                 }`}
             >
-              {asset.imageUrl ? (
+              {asset.image_url ? (
                 <img
-                  src={asset.imageUrl}
+                  src={asset.image_url}
                   alt={asset.name}
                   className="w-full h-32 object-cover"
                 />
@@ -66,7 +66,7 @@ const TrainedAssetList = ({
                   {asset.name}
                 </h3>
                 <p className="text-xs text-gray-400 mt-1">
-                  트리거: {asset.triggerWord}
+                  트리거: {asset.instance_prompt}
                 </p>
                 <p className="text-xs text-gray-500">상태: {asset.status}</p>
                 <div className="flex justify-end items-center mt-3">
@@ -118,16 +118,6 @@ const TrainedAssetList = ({
           캐릭터
         </button>
         <button
-          onClick={() => setFilter("background")}
-          className={`px-4 py-2 rounded-full text-sm whitespace-nowrap ${
-            filter === "background"
-              ? "bg-indigo-600 text-white"
-              : "bg-gray-700 text-gray-300 hover:bg-gray-600"
-          }`}
-        >
-          배경
-        </button>
-        <button
           onClick={() => setFilter("object")}
           className={`px-4 py-2 rounded-full text-sm whitespace-nowrap ${
             filter === "object"
@@ -136,6 +126,16 @@ const TrainedAssetList = ({
           }`}
         >
           오브젝트
+        </button>
+        <button
+          onClick={() => setFilter("style")}
+          className={`px-4 py-2 rounded-full text-sm whitespace-nowrap ${
+            filter === "style"
+              ? "bg-indigo-600 text-white"
+              : "bg-gray-700 text-gray-300 hover:bg-gray-600"
+          }`}
+        >
+          스타일
         </button>
         <button
           onClick={() => setFilter("favorite")}
@@ -169,9 +169,9 @@ const TrainedAssetList = ({
                     : "hover:scale-105 hover:shadow-xl"
                 }`}
             >
-              {asset.imageUrl ? (
+              {asset.image_url ? (
                 <img
-                  src={asset.imageUrl}
+                  src={asset.image_url}
                   alt={asset.name}
                   className="w-full h-32 object-cover"
                 />
@@ -192,7 +192,10 @@ const TrainedAssetList = ({
                   {asset.name}
                 </h3>
                 <p className="text-xs text-gray-400 mt-1">
-                  트리거: {asset.triggerWord}
+                  트리거: {asset.instance_prompt}
+                </p>
+                <p className="text-xs text-gray-400 mt-1">
+                  카테고리: {asset.lora_focus}
                 </p>
                 <p className="text-xs text-gray-500">상태: {asset.status}</p>
                 <div className="flex justify-end items-center mt-3">

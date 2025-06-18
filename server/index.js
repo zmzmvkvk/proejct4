@@ -325,19 +325,60 @@ app.post("/api/enhance-prompt", async (req, res) => {
 app.get("/api/list-elements", async (req, res) => {
   try {
     const apiKey = process.env.LEONARDO_API_KEY;
-    const response = await axios.get(
-      "https://cloud.leonardo.ai/api/rest/v1/elements",
+
+    if (!apiKey) {
+      console.error("LEONARDO_API_KEY is not set");
+      return res
+        .status(500)
+        .json({ error: "Leonardo API key is not configured" });
+    }
+
+    // 1. 먼저 사용자 정보를 가져와서 userId를 얻습니다
+    const userResponse = await axios.get(
+      "https://cloud.leonardo.ai/api/rest/v1/me",
       {
         headers: {
           Authorization: `Bearer ${apiKey}`,
         },
       }
     );
-    // 실제 Element 목록 반환
-    res.json(response.data.user_elements || []);
+
+    console.log("User response:", userResponse.data);
+
+    // Leonardo API의 실제 응답 구조에 맞게 userId 추출
+    const userId = userResponse.data.user_details?.[0]?.user?.id;
+    console.log("User ID:", userId);
+
+    if (!userId) {
+      console.error("Failed to get user ID from Leonardo API");
+      return res
+        .status(500)
+        .json({ error: "Failed to get user ID from Leonardo API" });
+    }
+
+    // 2. 사용자 ID로 Custom Element 목록을 가져옵니다
+    const elementsResponse = await axios.get(
+      `https://cloud.leonardo.ai/api/rest/v1/elements/user/${userId}`,
+      {
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+        },
+      }
+    );
+
+    console.log("Custom Elements API 응답:", elementsResponse.data);
+
+    // Custom Element 목록 반환 (user_loras 배열)
+    const customElements = (elementsResponse.data.user_loras || []).map(
+      (element) => ({
+        ...element,
+        thumbnailUrl: element.thumbnailUrl || null, // 썸네일 필드가 있으면 사용, 없으면 null
+      })
+    );
+    res.json(customElements);
   } catch (error) {
     console.error(
-      "Error fetching trained assets:",
+      "Error fetching custom elements:",
       error.response?.data || error.message
     );
     res.status(500).json({ error: error.message });
