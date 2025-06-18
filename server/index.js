@@ -321,12 +321,25 @@ app.post("/api/enhance-prompt", async (req, res) => {
   }
 });
 
-// 학습된 에셋 목록을 반환하는 엔드포인트
+// 학습된 에셋 목록을 반환하는 엔드포인트 (Leonardo AI와 동기화)
 app.get("/api/list-elements", async (req, res) => {
   try {
-    res.json(trainedAssets);
+    const apiKey = process.env.LEONARDO_API_KEY;
+    const response = await axios.get(
+      "https://cloud.leonardo.ai/api/rest/v1/elements",
+      {
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+        },
+      }
+    );
+    // 실제 Element 목록 반환
+    res.json(response.data.user_elements || []);
   } catch (error) {
-    console.error("Error fetching trained assets:", error);
+    console.error(
+      "Error fetching trained assets:",
+      error.response?.data || error.message
+    );
     res.status(500).json({ error: error.message });
   }
 });
@@ -399,46 +412,10 @@ app.post("/api/create-dataset", async (req, res) => {
 // (NEW) Leonardo.ai Custom Element 학습 시작 엔드포인트
 app.post("/api/train-element", async (req, res) => {
   try {
-    const {
-      name,
-      instance_prompt,
-      lora_focus,
-      train_text_encoder,
-      resolution,
-      sd_version,
-      num_train_epochs,
-      learning_rate,
-      description,
-      datasetId,
-      model_type,
-      strength,
-    } = req.body;
-
-    // FLUX_DEV + Character 조합 방어
-    if (sd_version === "FLUX_DEV" && lora_focus === "Character") {
-      return res.status(400).json({
-        error:
-          "FLUX_DEV 모델은 Character 카테고리를 지원하지 않습니다. 카테고리를 Object 또는 Style로 변경하세요.",
-      });
-    }
-
     const apiKey = process.env.LEONARDO_API_KEY;
     const response = await axios.post(
       "https://cloud.leonardo.ai/api/rest/v1/elements",
-      {
-        name,
-        instance_prompt,
-        lora_focus,
-        train_text_encoder,
-        resolution,
-        sd_version,
-        num_train_epochs,
-        learning_rate,
-        description,
-        datasetId,
-        model_type,
-        strength,
-      },
+      req.body,
       {
         headers: {
           "Content-Type": "application/json",
@@ -558,6 +535,31 @@ app.post("/api/gpt-description", async (req, res) => {
       error.response?.data || error.message
     );
     res.status(500).json({ error: error.message });
+  }
+});
+
+// [NEW] 특정 에셋의 상태만 조회하는 API 추가 (폴링 최적화)
+app.get("/api/elements/:elementId", async (req, res) => {
+  try {
+    const { elementId } = req.params;
+    const apiKey = process.env.LEONARDO_API_KEY;
+
+    const response = await axios.get(
+      `https://cloud.leonardo.ai/api/rest/v1/elements/${elementId}`,
+      {
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+        },
+      }
+    );
+    // user_elements 배열의 첫 번째 항목(요청한 에셋 정보)을 클라이언트로 보냄
+    res.json(response.data.user_elements[0] || null);
+  } catch (error) {
+    console.error(
+      "Error fetching single element status:",
+      error.response ? error.response.data : error.message
+    );
+    res.status(500).json({ error: "Failed to fetch element status" });
   }
 });
 

@@ -83,25 +83,21 @@ const ImageTrainingForm = ({ fetchTrainedAssets, setErrorMessage }) => {
       // 3. GPT-4o로 description 한 번만 생성
       const description = await getDescriptionWithGPT(assetName, category);
 
-      // 카테고리-모델 자동 매칭
-      let sd_version = "FLUX_DEV";
-      if (category === "Character") {
-        sd_version = "SDXL_1_0";
+      // 카테고리에 따라 sd_version을 명확하게 할당
+      let sd_version;
+      switch (category) {
+        case "Character":
+          sd_version = "SDXL_1_0";
+          break;
+        case "Object":
+        case "Style":
+          sd_version = "FLUX_DEV";
+          break;
+        default:
+          sd_version = "SDXL_1_0";
       }
 
-      // FLUX_DEV에서 Character 선택 시 에러 안내 및 중단
-      if (category === "Character" && sd_version === "FLUX_DEV") {
-        setErrorMessage(
-          "FLUX_DEV 모델은 Character 카테고리를 지원하지 않습니다. 카테고리를 Object 또는 Style로 변경하세요."
-        );
-        setIsTraining(false);
-        return;
-      }
-
-      // 디버깅용 콘솔 로그
-      console.log("lora_focus:", category, "sd_version:", sd_version);
-
-      // 4. 학습 요청
+      // 4. 학습 요청 (lora_focus: 'General', sd_version: 'SDXL_1_0'으로 고정)
       const trainResponse = await fetch("/api/train-element", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -110,11 +106,9 @@ const ImageTrainingForm = ({ fetchTrainedAssets, setErrorMessage }) => {
           description,
           datasetId: datasetId,
           instance_prompt: triggerWord,
-          model_type: "lora",
-          sd_version,
+          lora_focus: "General",
+          sd_version: "SDXL_1_0",
           resolution: 1024,
-          strength: "MEDIUM",
-          lora_focus: category,
           train_text_encoder: true,
           num_train_epochs: 100,
           learning_rate: 0.000001,
@@ -126,29 +120,36 @@ const ImageTrainingForm = ({ fetchTrainedAssets, setErrorMessage }) => {
       const userLoraId = trainData.sdTrainingJob.userLoraId;
       console.log("Training job started with userLoraId:", userLoraId);
 
-      // 5. 학습 완료될 때까지 폴링 (간단화된 로직)
+      // 5. 학습 완료될 때까지 폴링 (Polling)
       let trainingComplete = false;
       let attempts = 0;
-      const maxAttempts = 60; // 5초 * 60 = 5분 동안 폴링
-      while (!trainingComplete && attempts < maxAttempts) {
-        await new Promise((resolve) => setTimeout(resolve, 5000)); // 5초 대기
-        const statusResponse = await fetch("/api/list-elements"); // 전체 목록에서 찾거나, 단일 에셋 조회 API 사용
-        if (!statusResponse.ok)
-          throw new Error(
-            `Failed to poll training status: ${statusResponse.statusText}`
-          );
-        const statusData = await statusResponse.json();
-        const currentAsset = statusData.userElements.find(
-          (element) => element.id === userLoraId
-        );
+      const maxAttempts = 60; // 5초 * 60 = 5분
 
-        if (currentAsset && currentAsset.status === "COMPLETE") {
-          trainingComplete = true;
-          fetchTrainedAssets(); // 부모로부터 받은 함수 호출하여 에셋 목록 새로고침
-          break;
-        } else if (currentAsset && currentAsset.status === "FAILED") {
-          throw new Error("Element training failed on Leonardo.ai side.");
+      while (!trainingComplete && attempts < maxAttempts) {
+        await new Promise((resolve) => setTimeout(resolve, 5000));
+        // [FIXED] 전체 목록 대신, 특정 에셋의 상태만 조회하는 새 API 호출
+        const statusResponse = await fetch(`/api/elements/${userLoraId}`);
+
+        if (statusResponse.ok) {
+          const currentAsset = await statusResponse.json();
+
+          if (currentAsset && currentAsset.status === "COMPLETE") {
+            console.log("Training complete!");
+            trainingComplete = true;
+            fetchTrainedAssets(); // 부모 컴포넌트의 에셋 목록 새로고침
+          } else if (currentAsset && currentAsset.status === "FAILED") {
+            throw new Error("Element training failed on Leonardo.ai side.");
+          } else {
+            console.log(
+              `Polling attempt ${attempts + 1}: Status is ${
+                currentAsset?.status || "PENDING"
+              }`
+            );
+          }
+        } else {
+          console.log(`Polling attempt ${attempts + 1}: Failed to get status.`);
         }
+
         attempts++;
       }
 

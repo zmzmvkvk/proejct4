@@ -56,10 +56,9 @@ const ProjectDetail = () => {
         triggerWord: element.instancePrompt,
         category: element.loraFocus,
         status: element.status,
-        imageUrl: element.url ? element.url : null,
-        isLiked: element.isLiked || false,
-        isFavorite: element.isFavorite || false,
-        userLoraId: element.id, // userLoraId는 element의 id와 동일
+        imageUrl: element.urlImage ? element.urlImage : null,
+        isFavorite: false,
+        userLoraId: element.id,
       }));
       setTrainedAssets(assets);
       setAssetsError(null);

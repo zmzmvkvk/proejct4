@@ -16,18 +16,9 @@ const TrainedAssetList = ({
   const filteredAssets = simple
     ? assets
     : assets.filter((asset) => {
-        switch (filter) {
-          case "character":
-            return asset.type === "character";
-          case "background":
-            return asset.type === "background";
-          case "object":
-            return asset.type === "object";
-          case "favorite":
-            return asset.isFavorite;
-          default:
-            return true;
-        }
+        if (filter === "all") return true;
+        if (filter === "favorite") return asset.isFavorite;
+        return asset.category?.toLowerCase() === filter.toLowerCase();
       });
 
   if (simple) {
