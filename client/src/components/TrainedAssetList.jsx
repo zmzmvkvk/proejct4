@@ -47,10 +47,10 @@ const TrainedAssetList = ({
                 <img
                   src={asset.image_url}
                   alt={asset.name}
-                  className="w-full h-32 object-cover"
+                  className="w-full h-48 object-cover"
                 />
               ) : (
-                <div className="w-full h-32 bg-gray-600 flex items-center justify-center text-gray-400 text-sm">
+                <div className="w-full h-48 bg-gray-600 flex items-center justify-center text-gray-400">
                   {asset.status === "PENDING" ? (
                     <div className="flex flex-col items-center">
                       <Loader className="w-8 h-8 animate-spin" />
@@ -61,14 +61,17 @@ const TrainedAssetList = ({
                   )}
                 </div>
               )}
-              <div className="p-3">
-                <h3 className="text-md font-semibold text-gray-100 truncate">
+              <div className="p-4">
+                <h3 className="text-lg font-semibold text-gray-100 truncate">
                   {asset.name}
                 </h3>
-                <p className="text-xs text-gray-400 mt-1">
+                <p className="text-sm text-gray-400 mt-2">
                   트리거: {asset.instance_prompt}
                 </p>
-                <p className="text-xs text-gray-500">상태: {asset.status}</p>
+                <p className="text-sm text-gray-400">
+                  카테고리: {asset.lora_focus}
+                </p>
+                <p className="text-sm text-gray-500">상태: {asset.status}</p>
                 <div className="flex justify-end items-center mt-3">
                   <button
                     onClick={(e) => {
@@ -173,10 +176,10 @@ const TrainedAssetList = ({
                 <img
                   src={asset.image_url}
                   alt={asset.name}
-                  className="w-full h-32 object-cover"
+                  className="w-full h-48 object-cover"
                 />
               ) : (
-                <div className="w-full h-32 bg-gray-600 flex items-center justify-center text-gray-400 text-sm">
+                <div className="w-full h-48 bg-gray-600 flex items-center justify-center text-gray-400">
                   {asset.status === "PENDING" ? (
                     <div className="flex flex-col items-center">
                       <Loader className="w-8 h-8 animate-spin" />
@@ -187,17 +190,17 @@ const TrainedAssetList = ({
                   )}
                 </div>
               )}
-              <div className="p-3">
-                <h3 className="text-md font-semibold text-gray-100 truncate">
+              <div className="p-4">
+                <h3 className="text-lg font-semibold text-gray-100 truncate">
                   {asset.name}
                 </h3>
-                <p className="text-xs text-gray-400 mt-1">
+                <p className="text-sm text-gray-400 mt-2">
                   트리거: {asset.instance_prompt}
                 </p>
-                <p className="text-xs text-gray-400 mt-1">
+                <p className="text-sm text-gray-400">
                   카테고리: {asset.lora_focus}
                 </p>
-                <p className="text-xs text-gray-500">상태: {asset.status}</p>
+                <p className="text-sm text-gray-500">상태: {asset.status}</p>
                 <div className="flex justify-end items-center mt-3">
                   <button
                     onClick={(e) => {

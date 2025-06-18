@@ -55,12 +55,11 @@ const ProjectDetail = () => {
         id: element.id,
         name: element.name,
         triggerWord: element.instancePrompt,
-        category: element.focus, // "Character", "Object", "Style"
+        category: element.focus,
         status: element.status,
-        imageUrl: element.thumbnailUrl || null,
+        imageUrl: element.thumbnailUrl,
         isFavorite: false,
         userLoraId: element.id,
-        description: element.description,
       }));
       setTrainedAssets(assets);
       setAssetsError(null);
