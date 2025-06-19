@@ -10,67 +10,38 @@ const ProjectSelectionPage = () => {
   const [projects, setProjects] = useState([]);
   const [newProjectName, setNewProjectName] = useState("");
 
-  // 예시 스토리와 캐릭터 데이터
-  const exampleStory = `SCENE 1
-주인공 엘라라가 네온 불빛이 가득한 사이버펑크 도시의 뒷골목으로 들어선다. 비가 내리고 바닥은 젖어있다.
-
----
-
-SCENE 2
-엘라라는 거대한 감시 드론을 발견하고, 재빨리 그림자 속으로 몸을 숨긴다. 긴장감이 흐른다.
-
----
-
-SCENE 3
-드론이 지나간 후, 엘라라는 비밀스러운 문에 다가가 홀로그램 잠금장치를 해제하려고 시도한다.`;
-
-  const exampleCharacters = [
-    {
-      id: Date.now().toString() + "-elara", // 고유 ID를 위해 문자열 추가
-      name: "엘라라",
-      referenceImage:
-        "https://cdn.leonardo.ai/users/4f696346-f713-4608-9d53-b6d3e82b78de/generations/ecd388e2-e7c4-434f-841e-c6514d616317/3D_Animation_Style_Scene_depicting_the_protagonist_entering_a_0.jpg",
-      description:
-        "An anthropomorphic raccoon character with a curious expression, known for her cleverness and agility. She has soft, grey-brown fur, a bushy ringed tail, and intelligent dark eyes. She often wears practical, forest-green clothing.",
-    },
-  ];
-
   useEffect(() => {
-    // 로컬 스토리지에서 프로젝트 로드
-    const storedProjects = JSON.parse(
-      localStorage.getItem("animation_projects") || "[]"
-    );
-    setProjects(storedProjects);
+    // Firestore에서 프로젝트 목록 불러오기
+    fetch("/api/projects")
+      .then((res) => res.json())
+      .then(setProjects)
+      .catch(console.error);
   }, []);
 
-  const saveProjects = (updatedProjects) => {
-    setProjects(updatedProjects);
-    localStorage.setItem("animation_projects", JSON.stringify(updatedProjects));
-  };
-
-  const handleCreateProject = () => {
+  const handleCreateProject = async () => {
     if (newProjectName.trim() === "") {
       alert("프로젝트 이름을 입력해주세요.");
       return;
     }
-    const newProject = {
-      id: Date.now().toString(),
-      name: newProjectName.trim(),
-      story: exampleStory, // 예시 스토리로 초기화
-      characters: exampleCharacters, // 예시 캐릭터로 초기화
-      scenes: [], // 장면은 스토리 기반으로 생성되므로 빈 배열 유지
-    };
-    const updatedProjects = [...projects, newProject];
-    saveProjects(updatedProjects);
+    const res = await fetch("/api/projects", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: newProjectName.trim() }),
+    });
+    const newProject = await res.json();
+    setProjects((prev) => [...prev, newProject]);
     setNewProjectName("");
-    // 새 프로젝트 생성 후 바로 해당 프로젝트 상세 페이지로 이동
-    // 이 부분은 라우팅 설정이 완료되면 Link 컴포넌트 내부에서 처리될 것이므로, 여기서는 단순히 생성만 진행합니다.
   };
 
-  const handleDeleteProject = (id) => {
+  const handleDeleteProject = async (id) => {
     if (window.confirm("정말로 이 프로젝트를 삭제하시겠습니까?")) {
-      const updatedProjects = projects.filter((p) => p.id !== id);
-      saveProjects(updatedProjects);
+      // Firestore에서 삭제 API 호출
+      const res = await fetch(`/api/projects/${id}`, { method: "DELETE" });
+      if (res.ok) {
+        setProjects(projects.filter((p) => p.id !== id));
+      } else {
+        alert("프로젝트 삭제에 실패했습니다.");
+      }
     }
   };
 

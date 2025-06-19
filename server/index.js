@@ -4,16 +4,29 @@ const dotenv = require("dotenv");
 const axios = require("axios");
 const multer = require("multer");
 const FormData = require("form-data");
-const { PrismaClient } = require("@prisma/client");
+const admin = require("firebase-admin");
+const serviceAccount = require("./firebase-service-account-key.json");
+const path = require("path");
 
-dotenv.config();
+dotenv.config({ path: path.resolve(__dirname, ".env") });
 
 const app = express();
 const port = process.env.PORT || 3000;
-const prisma = new PrismaClient();
 
 app.use(cors());
 app.use(express.json());
+
+admin.initializeApp({
+  credential: admin.credential.cert(serviceAccount),
+});
+const db = admin.firestore();
+
+// Firestore 연결 확인 로그
+if (db && typeof db.collection === "function") {
+  console.log("Firestore 연결 성공");
+} else {
+  console.log("Firestore 연결 실패");
+}
 
 // 임시 인메모리 데이터 저장소 (Prisma를 사용하지 않으므로 대체)
 let trainedAssets = [
@@ -187,35 +200,35 @@ app.post(
 // (NEW) 캐릭터 기반 이미지 생성 엔드포인트
 app.post("/api/generate-image", async (req, res) => {
   try {
-    const { storyText, characterName } = req.body;
+    const { storyText, characterName, triggerWord, assetId } = req.body;
     const apiKey = process.env.LEONARDO_API_KEY;
 
     if (!storyText || storyText.trim() === "") {
       throw new Error("스토리 텍스트가 비어있습니다.");
     }
 
-    // 캐릭터 프롬프트 매핑 (실제 훈련된 LoRA 모델에 맞게 설정)
-    const characterPromptMap = {
-      지포맨: "<lora:g_po_man:0.8>, g_po_man character",
-      아쿠아걸: "<lora:aqua_girl:0.7>, aqua_girl character",
-      엘라라: "<lora:elara_character:0.8>, elara_character",
-      // 추가 캐릭터들은 여기에 추가
-    };
-
-    // 캐릭터 트리거 찾기
-    const characterTrigger = characterName
-      ? characterPromptMap[characterName]
-      : null;
-
-    // 최종 프롬프트 구성
-    let finalPrompt;
-    if (characterTrigger) {
-      finalPrompt = `${characterTrigger}, ${storyText}, cinematic lighting, masterpiece, best quality, 3D Animation Style`;
-    } else {
-      finalPrompt = `${storyText}, cinematic lighting, masterpiece, best quality, 3D Animation Style`;
+    // LoRA 프롬프트: 트리거워드, 캐릭터명
+    let loraPrompt = "";
+    if (characterName && triggerWord) {
+      loraPrompt = `${triggerWord}, ${characterName}`;
     }
 
-    console.log("Final prompt for generation:", finalPrompt);
+    // 최종 프롬프트
+    let finalPrompt = loraPrompt
+      ? `${loraPrompt}, ${storyText}, cinematic lighting, masterpiece, best quality, 3D Animation Style`
+      : `${storyText}, cinematic lighting, masterpiece, best quality, 3D Animation Style`;
+
+    // 콘솔에 프롬프트와 주요 값 출력
+    console.log("=== [Leonardo 이미지 생성 요청] ===");
+    console.log("프롬프트:", finalPrompt);
+    console.log(
+      "characterName:",
+      characterName,
+      "triggerWord:",
+      triggerWord,
+      "assetId:",
+      assetId
+    );
 
     // Leonardo.ai API 호출
     const response = await axios.post(
@@ -224,7 +237,7 @@ app.post("/api/generate-image", async (req, res) => {
         prompt: finalPrompt,
         negative_prompt:
           "blurry, deformed, ugly, bad anatomy, extra limbs, watermark, text, signature",
-        modelId: "d69c8273-6b17-4a30-a13e-d6637ae1c644", // 3D Animation Style 모델
+        modelId: "d69c8273-6b17-4a30-a13e-d6637ae1c644",
         width: 576,
         height: 1024,
         num_images: 1,
@@ -247,7 +260,6 @@ app.post("/api/generate-image", async (req, res) => {
     let generatedImageUrl = null;
     for (let i = 0; i < 30; i++) {
       await new Promise((resolve) => setTimeout(resolve, 5000));
-
       const pollResponse = await axios.get(
         `https://cloud.leonardo.ai/api/rest/v1/generations/${generationId}`,
         {
@@ -256,7 +268,6 @@ app.post("/api/generate-image", async (req, res) => {
           },
         }
       );
-
       const jobStatus = pollResponse.data.generations_by_pk;
       if (jobStatus && jobStatus.status === "COMPLETE") {
         generatedImageUrl = jobStatus.generated_images[0].url;
@@ -272,7 +283,9 @@ app.post("/api/generate-image", async (req, res) => {
       success: true,
       imageUrl: generatedImageUrl,
       prompt: finalPrompt,
-      characterName: characterName,
+      characterName,
+      triggerWord,
+      assetId,
     });
   } catch (error) {
     console.error(
@@ -461,36 +474,22 @@ app.post("/api/assets/:id/toggle-like", (req, res) => {
   }
 });
 
-// (NEW) 에셋 즐겨찾기/취소 엔드포인트
-app.post("/api/assets/:id/toggle-favorite", (req, res) => {
+// (NEW) 에셋 즐겨찾기/취소 엔드포인트 (Prisma 기반)
+app.post("/api/assets/:id/toggle-favorite", async (req, res) => {
   try {
     const { id } = req.params;
-
-    // 먼저 인메모리 배열에서 찾기
-    let assetIndex = trainedAssets.findIndex((asset) => asset.id === id);
-
-    if (assetIndex === -1) {
-      // 인메모리 배열에 없으면 새로 추가 (Leonardo API에서 가져온 에셋)
-      const newAsset = {
-        id: id,
-        name: `Asset ${id}`,
-        instancePrompt: `asset_${id}`,
-        loraFocus: "CHARACTER",
-        status: "COMPLETE",
-        url: "https://via.placeholder.com/150/888888/FFFFFF?text=Asset",
-        isLiked: false,
-        isFavorite: false,
-        type: "CHARACTER",
-      };
-
-      trainedAssets.push(newAsset);
-      assetIndex = trainedAssets.length - 1;
+    // Prisma에서 해당 에셋 조회
+    let asset = await prisma.asset.findUnique({ where: { id } });
+    if (!asset) {
+      // 없으면 404 반환
+      return res.status(404).json({ error: "Asset not found" });
     }
-
     // 즐겨찾기 상태 토글
-    trainedAssets[assetIndex].isFavorite =
-      !trainedAssets[assetIndex].isFavorite;
-    res.json({ success: true, asset: trainedAssets[assetIndex] });
+    const updated = await prisma.asset.update({
+      where: { id },
+      data: { isFavorite: !asset.isFavorite },
+    });
+    res.json({ success: true, asset: updated });
   } catch (error) {
     console.error("Error toggling favorite status:", error);
     res.status(500).json({ error: "즐겨찾기 상태 변경 실패." });
@@ -677,6 +676,203 @@ app.get("/api/elements/:elementId", async (req, res) => {
     );
     res.status(500).json({ error: "Failed to fetch element status" });
   }
+});
+
+// Firestore 기반 프로젝트/에셋/즐겨찾기 CRUD
+
+// 프로젝트 목록 불러오기
+app.get("/api/projects", async (req, res) => {
+  console.log("[LOG] /api/projects GET 요청 들어옴");
+  try {
+    const snapshot = await db.collection("projects").get();
+    const projects = snapshot.docs.map((doc) => ({
+      id: doc.id,
+      ...doc.data(),
+    }));
+    res.json(projects);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// 프로젝트 생성
+app.post("/api/projects", async (req, res) => {
+  console.log("[LOG] /api/projects POST 요청 들어옴");
+  try {
+    const { name } = req.body;
+    const docRef = await db.collection("projects").add({ name });
+    res.json({ id: docRef.id, name });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// 에셋 목록 불러오기 (특정 프로젝트)
+app.get("/api/projects/:projectId/assets", async (req, res) => {
+  try {
+    const { projectId } = req.params;
+    const assetsRef = db
+      .collection("projects")
+      .doc(projectId)
+      .collection("assets");
+    const snapshot = await assetsRef.get();
+    let assets = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+    if (assets.length === 0) {
+      // Firestore에 없으면 leonardo ai api에서 받아와서 저장
+      const apiKey = process.env.LEONARDO_API_KEY;
+      const response = await axios.get(
+        "https://cloud.leonardo.ai/api/rest/v1/elements/user/me",
+        {
+          headers: { Authorization: `Bearer ${apiKey}` },
+        }
+      );
+      const list = response.data.user_loras || [];
+      // Firestore에 저장
+      for (const element of list) {
+        if (!element.id) continue; // id가 없으면 저장하지 않음
+        const assetData = {
+          name: element.name,
+          triggerWord: element.instancePrompt,
+          category: element.focus,
+          status: element.status,
+          imageUrl: element.thumbnailUrl,
+          isFavorite: false,
+          userLoraId: element.id,
+        };
+        await assetsRef.doc(element.id).set(assetData);
+      }
+      // 다시 불러오기
+      const newSnapshot = await assetsRef.get();
+      assets = newSnapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+    }
+    res.json(assets);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// 에셋 생성 (특정 프로젝트)
+app.post("/api/projects/:projectId/assets", async (req, res) => {
+  try {
+    const { projectId } = req.params;
+    const assetData = req.body;
+    const docRef = await db
+      .collection("projects")
+      .doc(projectId)
+      .collection("assets")
+      .add(assetData);
+    res.json({ id: docRef.id, ...assetData });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// 즐겨찾기 토글 (특정 프로젝트의 에셋)
+app.post(
+  "/api/projects/:projectId/assets/:assetId/toggle-favorite",
+  async (req, res) => {
+    try {
+      const { projectId, assetId } = req.params;
+      const assetRef = db
+        .collection("projects")
+        .doc(projectId)
+        .collection("assets")
+        .doc(assetId);
+      const assetDoc = await assetRef.get();
+      if (!assetDoc.exists) {
+        return res.status(404).json({ error: "Asset not found" });
+      }
+      const current = assetDoc.data();
+      const updated = { ...current, isFavorite: !current.isFavorite };
+      await assetRef.set(updated);
+      res.json({ success: true, asset: updated });
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
+  }
+);
+
+// 프로젝트 삭제
+app.delete("/api/projects/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    await db.collection("projects").doc(id).delete();
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// 에셋 목록 불러오기 (프로젝트와 무관, 전역 assets 컬렉션)
+app.get("/api/assets", async (req, res) => {
+  try {
+    const assetsRef = db.collection("assets");
+    const snapshot = await assetsRef.get();
+    let assets = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+    if (assets.length === 0) {
+      // Firestore에 없으면 leonardo ai api에서 받아와서 저장
+      const apiKey = process.env.LEONARDO_API_KEY;
+      // 1. userId 얻기
+      const userRes = await axios.get(
+        "https://cloud.leonardo.ai/api/rest/v1/me",
+        {
+          headers: { Authorization: `Bearer ${apiKey}` },
+        }
+      );
+      const userId = userRes.data.user_details?.[0]?.user?.id;
+      if (!userId) throw new Error("Leonardo API userId를 얻을 수 없습니다.");
+      // 2. 엘리먼트 리스트 가져오기
+      const response = await axios.get(
+        `https://cloud.leonardo.ai/api/rest/v1/elements/user/${userId}`,
+        { headers: { Authorization: `Bearer ${apiKey}` } }
+      );
+      console.log("Leonardo elements API 응답:", response.data);
+      const list = response.data.user_loras || [];
+      for (const element of list) {
+        console.log("element.id:", element.id);
+        if (!element.id) continue; // id가 없으면 저장하지 않음
+        const assetData = {
+          name: element.name,
+          triggerWord: element.instancePrompt,
+          category: element.focus,
+          status: element.status,
+          imageUrl: element.thumbnailUrl,
+          isFavorite: false,
+          userLoraId: element.id,
+        };
+        await assetsRef.doc(element.id).set(assetData);
+      }
+      // 다시 불러오기
+      const newSnapshot = await assetsRef.get();
+      assets = newSnapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+    }
+    res.json(assets);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// 에셋 즐겨찾기 토글 (전역 assets 컬렉션)
+app.post("/api/assets/:assetId/toggle-favorite", async (req, res) => {
+  try {
+    const { assetId } = req.params;
+    const assetRef = db.collection("assets").doc(assetId);
+    const assetDoc = await assetRef.get();
+    if (!assetDoc.exists) {
+      return res.status(404).json({ error: "Asset not found" });
+    }
+    const current = assetDoc.data();
+    const updated = { ...current, isFavorite: !current.isFavorite };
+    await assetRef.set(updated);
+    res.json({ success: true, asset: updated });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// 서버 라우트 등록 점검용
+app.get("/api/ping", (req, res) => {
+  res.json({ message: "pong" });
 });
 
 app.listen(port, () => {

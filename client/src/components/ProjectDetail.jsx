@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
 import Button from "./Button";
 import Card from "./Card";
 import CardTitle from "./CardTitle";
@@ -13,6 +13,7 @@ import ImageTrainingForm from "./ImageTrainingForm";
 
 const ProjectDetail = () => {
   const navigate = useNavigate();
+  const { projectId } = useParams();
   const [activeTab, setActiveTab] = useState("training");
 
   // States for Story/Character/Image Generation
@@ -29,26 +30,16 @@ const ProjectDetail = () => {
   const [assetFilter, setAssetFilter] = useState("all");
   const [activeAssetId, setActiveAssetId] = useState(null);
 
-  // 학습된 에셋 목록을 불러오는 함수
+  // Firestore에서 에셋 목록 불러오기 (전역)
   const fetchTrainedAssets = useCallback(async () => {
     try {
       setLoadingAssets(true);
-      const response = await fetch("/api/list-elements");
+      const response = await fetch(`/api/assets`);
       if (!response.ok) {
-        throw new Error("학습된 에셋을 가져오는데 실패했습니다.");
+        throw new Error("에셋을 가져오는데 실패했습니다.");
       }
       const data = await response.json();
-      const assets = data.map((element) => ({
-        id: element.id,
-        name: element.name,
-        triggerWord: element.instancePrompt,
-        category: element.focus,
-        status: element.status,
-        imageUrl: element.thumbnailUrl,
-        isFavorite: false,
-        userLoraId: element.id,
-      }));
-      setTrainedAssets(assets);
+      setTrainedAssets(data);
       setAssetsError(null);
     } catch (err) {
       setAssetsError(err.message);
@@ -58,13 +49,40 @@ const ProjectDetail = () => {
     }
   }, []);
 
-  // 즐겨찾기 토글 함수 (프론트 상태만 변경)
-  const handleToggleFavorite = useCallback((id) => {
-    setTrainedAssets((prevAssets) =>
-      prevAssets.map((asset) =>
-        asset.id === id ? { ...asset, isFavorite: !asset.isFavorite } : asset
-      )
-    );
+  // Firestore에 에셋 추가 함수 예시 (필요시 사용)
+  const addAssetToFirestore = async (assetData) => {
+    const res = await fetch(`/api/projects/${projectId}/assets`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(assetData),
+    });
+    if (res.ok) {
+      const newAsset = await res.json();
+      setTrainedAssets((prev) => [...prev, newAsset]);
+    }
+  };
+
+  // 즐겨찾기 토글 함수 (전역)
+  const handleToggleFavorite = useCallback(async (id) => {
+    try {
+      const res = await fetch(`/api/assets/${id}/toggle-favorite`, {
+        method: "POST",
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setTrainedAssets((prevAssets) =>
+          prevAssets.map((asset) =>
+            asset.id === id
+              ? { ...asset, isFavorite: data.asset.isFavorite }
+              : asset
+          )
+        );
+      } else {
+        alert("즐겨찾기 상태 변경에 실패했습니다.");
+      }
+    } catch (e) {
+      alert("서버와 통신 중 오류가 발생했습니다.");
+    }
   }, []);
 
   // 컴포넌트 마운트 시 에셋 목록 불러오기
@@ -105,15 +123,34 @@ const ProjectDetail = () => {
         const sceneDescription = scene.description;
         const primaryAsset =
           scene.referencedAssets && scene.referencedAssets[0];
-        // 실제 API 호출 로직은 프로젝트 상황에 맞게 구현
-        // 예시: primaryAsset 정보와 sceneDescription을 활용
-        // ... (API 호출 및 결과 처리)
-        // 예시: 이미지 생성 성공 시
-        // setScenes((currentScenes) =>
-        //   currentScenes.map((s, i) =>
-        //     i === sceneIndex ? { ...s, imageUrl: "생성된_이미지_URL" } : s
-        //   )
-        // );
+
+        // primaryAsset 정보를 API에 포함해서 전달
+        const response = await fetch("/api/generate-image", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            storyText: sceneDescription,
+            characterName: primaryAsset ? primaryAsset.name : null,
+            triggerWord: primaryAsset ? primaryAsset.triggerWord : null,
+            assetId: primaryAsset ? primaryAsset.id : null,
+          }),
+        });
+
+        if (!response.ok) {
+          const errorBody = await response.text();
+          throw new Error(
+            `이미지 생성 API 오류: ${response.status}\n\n${errorBody}`
+          );
+        }
+
+        const result = await response.json();
+        const generatedImageUrl = result.imageUrl;
+        if (!generatedImageUrl) throw new Error("이미지 생성이 실패했습니다.");
+        setScenes((currentScenes) =>
+          currentScenes.map((s, i) =>
+            i === sceneIndex ? { ...s, imageUrl: generatedImageUrl } : s
+          )
+        );
       } catch (error) {
         setErrorMessage(`이미지 생성 중 오류 발생: ${error.message}`);
       } finally {
@@ -122,6 +159,17 @@ const ProjectDetail = () => {
     },
     [scenes]
   );
+
+  // TrainedAssetList에 넘길 때 asset 구조 맞추기 (id, name, triggerWord, category, status, imageUrl, isFavorite)
+  const mappedAssets = trainedAssets.map((asset) => ({
+    id: asset.id,
+    name: asset.name,
+    triggerWord: asset.triggerWord || asset.instancePrompt,
+    category: asset.category || asset.focus,
+    status: asset.status,
+    imageUrl: asset.imageUrl || "",
+    isFavorite: asset.isFavorite || false,
+  }));
 
   return (
     <div className="min-h-screen bg-gray-900 text-white">
@@ -169,7 +217,7 @@ const ProjectDetail = () => {
               setErrorMessage={setErrorMessage}
             />
             <TrainedAssetList
-              assets={trainedAssets}
+              assets={mappedAssets}
               onToggleFavorite={handleToggleFavorite}
             />
           </div>
