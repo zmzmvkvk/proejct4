@@ -4,8 +4,6 @@ const dotenv = require("dotenv");
 const axios = require("axios");
 const multer = require("multer");
 const FormData = require("form-data");
-const admin = require("firebase-admin");
-const serviceAccount = require("./firebase-service-account-key.json");
 const path = require("path");
 
 dotenv.config({ path: path.resolve(__dirname, ".env") });
@@ -16,16 +14,26 @@ const port = process.env.PORT || 3000;
 app.use(cors());
 app.use(express.json());
 
-admin.initializeApp({
-  credential: admin.credential.cert(serviceAccount),
-});
-const db = admin.firestore();
-
-// Firestore 연결 확인 로그
-if (db && typeof db.collection === "function") {
-  console.log("Firestore 연결 성공");
-} else {
-  console.log("Firestore 연결 실패");
+// Firebase 초기화 (에러가 발생해도 서버는 계속 실행)
+let db = null;
+try {
+  const admin = require("firebase-admin");
+  const serviceAccount = require("./firebase-service-account-key.json");
+  
+  admin.initializeApp({
+    credential: admin.credential.cert(serviceAccount),
+  });
+  db = admin.firestore();
+  
+  // Firestore 연결 확인 로그
+  if (db && typeof db.collection === "function") {
+    console.log("Firestore 연결 성공");
+  } else {
+    console.log("Firestore 연결 실패");
+  }
+} catch (error) {
+  console.warn("Firebase 초기화 실패:", error.message);
+  console.warn("Firestore 기능을 사용할 수 없습니다. 인메모리 데이터를 사용합니다.");
 }
 
 // 임시 인메모리 데이터 저장소 (Prisma를 사용하지 않으므로 대체)
@@ -790,6 +798,12 @@ app.delete("/api/projects/:id", async (req, res) => {
 // 에셋 목록 불러오기 (프로젝트와 무관, 전역 assets 컬렉션)
 app.get("/api/assets", async (req, res) => {
   try {
+    // Firestore가 연결되지 않은 경우 인메모리 데이터 반환
+    if (!db) {
+      console.log("Firestore가 연결되지 않음. 인메모리 데이터 반환");
+      return res.json(trainedAssets);
+    }
+    
     const assetsRef = db.collection("assets");
     const snapshot = await assetsRef.get();
     let assets = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
@@ -837,7 +851,9 @@ app.get("/api/assets", async (req, res) => {
     }
     res.json(assets);
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    console.error("Error fetching assets:", error);
+    // 에러 발생 시 인메모리 데이터 반환
+    res.json(trainedAssets);
   }
 });
 
