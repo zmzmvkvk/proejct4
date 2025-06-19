@@ -39,9 +39,41 @@ const StoryboardViewer = ({
                   <h3 className="font-bold text-lg text-indigo-300 mb-2">
                     SCENE {index + 1}
                   </h3>
-                  <p className="text-gray-300 text-sm leading-6">
+                  <p className="text-gray-300 text-sm leading-6 mb-4">
                     {scene.description}
                   </p>
+                  {/* 참조된 에셋 표시 영역 */}
+                  {scene.referencedAssets &&
+                    scene.referencedAssets.length > 0 && (
+                      <div className="mb-4">
+                        <h4 className="text-xs font-semibold text-gray-400 mb-2">
+                          참조된 에셋
+                        </h4>
+                        <div className="flex flex-wrap gap-2">
+                          {scene.referencedAssets.map((asset) => (
+                            <div
+                              key={asset.id}
+                              className="bg-gray-700 p-1.5 rounded-md flex items-center gap-2 text-xs"
+                            >
+                              {asset.imageUrl ? (
+                                <img
+                                  src={asset.imageUrl}
+                                  alt={asset.name}
+                                  className="w-6 h-6 rounded-sm object-cover"
+                                />
+                              ) : (
+                                <div className="w-6 h-6 bg-gray-600 rounded-sm flex items-center justify-center">
+                                  <span className="text-yellow-400">★</span>
+                                </div>
+                              )}
+                              <span className="text-gray-200 font-medium">
+                                {asset.name}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                 </div>
                 <Button
                   onClick={() => onGenerate(index, detectedCharacter)}
