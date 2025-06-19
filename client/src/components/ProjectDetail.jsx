@@ -5,18 +5,6 @@ import Card from "./Card";
 import CardTitle from "./CardTitle";
 import Input from "./Input";
 import ErrorModal from "./ErrorModal";
-import {
-  Sparkles,
-  BookText,
-  Image,
-  User,
-  Clapperboard,
-  Loader,
-  PlusCircle,
-  Trash2,
-  AlertCircle,
-  ArrowLeft,
-} from "./Icons";
 import StoryInput from "./StoryInput";
 import CharacterManager from "./CharacterManager";
 import StoryboardViewer from "./StoryboardViewer";
@@ -29,10 +17,11 @@ const ProjectDetail = () => {
 
   // States for Story/Character/Image Generation
   const [story, setStory] = useState("");
-  const [characters, setCharacters] = useState([]);
   const [scenes, setScenes] = useState([]);
   const [generatingScene, setGeneratingScene] = useState(null);
   const [errorMessage, setErrorMessage] = useState(null);
+  const [detectedCharacter, setDetectedCharacter] = useState(null);
+  const [characterData, setCharacterData] = useState(null);
 
   // States for Trained Assets Management
   const [trainedAssets, setTrainedAssets] = useState([]); // 학습된 에셋 목록
@@ -50,17 +39,19 @@ const ProjectDetail = () => {
         throw new Error("학습된 에셋을 가져오는데 실패했습니다.");
       }
       const data = await response.json();
-      console.log("서버에서 받은 데이터:", data);
+
+      // [FINAL FIX] API 응답 데이터의 실제 키 이름과 일치시켰습니다.
       const assets = data.map((element) => ({
         id: element.id,
         name: element.name,
         triggerWord: element.instancePrompt,
-        category: element.focus,
+        category: element.focus, // 'loraFocus' -> 'focus'
         status: element.status,
-        imageUrl: element.thumbnailUrl,
+        imageUrl: element.thumbnailUrl, // 'url' 또는 'urlImage' -> 'thumbnailUrl'
         isFavorite: false,
         userLoraId: element.id,
       }));
+
       setTrainedAssets(assets);
       setAssetsError(null);
     } catch (err) {
@@ -121,11 +112,6 @@ const ProjectDetail = () => {
     [setErrorMessage]
   );
 
-  // 컴포넌트 마운트 시 에셋 목록 불러오기
-  useEffect(() => {
-    fetchTrainedAssets();
-  }, [fetchTrainedAssets]);
-
   // 스토리가 변경될 때 장면 목록을 업데이트
   useEffect(() => {
     const sceneDescriptions = story
@@ -143,165 +129,64 @@ const ProjectDetail = () => {
     });
   }, [story]);
 
-  // 보고서의 제안에 따라 Gemini API를 사용해 프롬프트를 강화하는 함수 (server proxy version)
-  const enhancePromptWithGemini = useCallback(
-    async (sceneDescription, mentionedAsset) => {
-      try {
-        const apiUrl = `/api/enhance-prompt`;
-        const payload = {
-          sceneDescription,
-          character: mentionedAsset
-            ? {
-                name: mentionedAsset.name,
-                description: `A character named ${mentionedAsset.name} with triggerWord ${mentionedAsset.triggerWord}`,
-                referenceImage: mentionedAsset.imageUrl,
-                triggerWord: mentionedAsset.triggerWord,
-              }
-            : null,
-        };
-
-        const response = await fetch(apiUrl, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
-        });
-
-        if (!response.ok) {
-          const errorBody = await response.text();
-          throw new Error(`Gemini API error: ${response.status}\n${errorBody}`);
-        }
-
-        const result = await response.json();
-        return result; // result should contain prompt and negative_prompt
-      } catch (error) {
-        console.error("Error enhancing prompt:", error);
-        setErrorMessage(`프롬프트 강화 중 오류 발생: ${error.message}`);
-        // Gemini 실패 시 기본 프롬프트 사용
-        return {
-          prompt: `3D Animation Style, cinematic, ${sceneDescription}`,
-          negative_prompt: "blurry, ugly, deformed",
-        };
-      }
-    },
-    [setErrorMessage]
-  );
-
-  // Leonardo.ai에 URL로 이미지를 업로드하고 ID를 받아오는 함수 (server proxy version)
-  const getLeonardoImageId = useCallback(async (imageUrl) => {
-    if (!imageUrl) {
-      throw new Error("Cannot upload image: URL is missing.");
-    }
-    const response = await fetch("/api/upload-reference-image", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ imageUrl: imageUrl }),
-    });
-
-    if (!response.ok) {
-      const errorBody = await response.text();
-      console.error("Leonardo Upload Image Error Body:", errorBody);
-      throw new Error(
-        `Leonardo upload image from URL API error: ${response.status} - ${errorBody}`
-      );
-    }
-
-    const result = await response.json();
-    if (result?.id) {
-      // Server response might return { id: "..." }
-      return result.id;
-    } else {
-      throw new Error("Failed to get image ID from Leonardo upload response.");
-    }
+  // 캐릭터 감지 콜백 함수
+  const handleCharacterDetected = useCallback((character, data) => {
+    setDetectedCharacter(character);
+    setCharacterData(data);
   }, []);
 
-  // Leonardo.ai API를 호출하여 이미지를 생성하는 함수 (server proxy version)
+  // 컴포넌트 마운트 시 에셋 목록 불러오기
+  useEffect(() => {
+    fetchTrainedAssets();
+  }, [fetchTrainedAssets]);
+
+  // Leonardo.ai API를 호출하여 이미지를 생성하는 함수 (새로운 캐릭터 기반 API 사용)
   const generateImageWithLeonardo = useCallback(
-    async (sceneIndex) => {
+    async (sceneIndex, detectedCharacter) => {
       setGeneratingScene(sceneIndex);
 
       try {
         const sceneDescription = scenes[sceneIndex].description;
 
-        // 장면에 언급된 캐릭터 찾기
-        const mentionedCharacter = characters.find((char) =>
-          sceneDescription.includes(char.name)
-        );
-
-        let init_image_id = null;
-        let userElements = [];
-
-        if (mentionedCharacter && mentionedCharacter.referenceImage) {
-          try {
-            console.log(
-              `Uploading reference image for ${mentionedCharacter.name}...`
-            );
-            init_image_id = await getLeonardoImageId(
-              mentionedCharacter.referenceImage
-            );
-            console.log(`Obtained init_image_id: ${init_image_id}`);
-          } catch (error) {
-            console.error("Failed to upload reference image:", error);
-            setErrorMessage(
-              `참조 이미지 업로드 실패: ${error.message}\n\n프롬프트만으로 생성을 계속합니다.`
-            );
-          }
-        }
-
-        // Add userLoraId to userElements if available (from TrainingManager asset structure)
-        if (mentionedCharacter && mentionedCharacter.userLoraId) {
-          userElements.push({
-            userLoraId: mentionedCharacter.userLoraId,
-            weight: 1, // Default weight
-          });
-        }
-
-        // 1. Gemini로 프롬프트 강화 (서버 API 호출)
-        const { prompt, negative_prompt } = await enhancePromptWithGemini(
-          sceneDescription,
-          mentionedCharacter
-        );
-        console.log("Enhanced Prompt:", prompt);
-
-        // 2. Leonardo.ai에 이미지 생성 요청 (서버 API 호출)
-        const leoApiUrl = "/api/generate-image";
-
-        const payload = {
-          prompt: prompt,
-          negative_prompt: negative_prompt,
-          init_image_id: init_image_id,
-          userElements: userElements,
-        };
-
-        const response = await fetch(leoApiUrl, {
+        // 새로운 API 엔드포인트 호출
+        const response = await fetch("/api/generate-image", {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
           },
-          body: JSON.stringify(payload),
+          body: JSON.stringify({
+            storyText: sceneDescription,
+            characterName: detectedCharacter,
+          }),
         });
 
         if (!response.ok) {
           const errorBody = await response.text();
-          console.error("Leonardo API Error Body (from server):", errorBody);
+          console.error("Image generation API Error:", errorBody);
           throw new Error(
-            `Leonardo API error (from server): ${response.status}\n\n${errorBody}`
+            `이미지 생성 API 오류: ${response.status}\n\n${errorBody}`
           );
         }
 
         const result = await response.json();
-        const generatedImageUrl = result.imageUrl; // Assuming server returns { imageUrl: "..." }
+        const generatedImageUrl = result.imageUrl;
 
-        if (!generatedImageUrl)
-          throw new Error("Image generation timed out or failed.");
+        if (!generatedImageUrl) {
+          throw new Error("이미지 생성이 실패했습니다.");
+        }
 
-        // 3. 상태 업데이트
+        // 상태 업데이트
         setScenes((currentScenes) =>
           currentScenes.map((s, i) =>
             i === sceneIndex ? { ...s, imageUrl: generatedImageUrl } : s
           )
         );
+
+        console.log("Image generated successfully:", {
+          sceneIndex,
+          characterName: detectedCharacter,
+          prompt: result.prompt,
+        });
       } catch (error) {
         console.error("Error generating image:", error);
         setErrorMessage(`이미지 생성 중 오류 발생: ${error.message}`);
@@ -309,27 +194,18 @@ const ProjectDetail = () => {
         setGeneratingScene(null);
       }
     },
-    [
-      scenes,
-      characters,
-      enhancePromptWithGemini,
-      getLeonardoImageId,
-      setErrorMessage,
-    ]
+    [scenes, setErrorMessage]
   );
 
   return (
     <div className="min-h-screen bg-gray-900 text-white">
       <header className="bg-gray-800 p-4 shadow-lg flex justify-between items-center border-b border-gray-700">
         <div className="flex items-center gap-3">
-          <Sparkles className="w-8 h-8 text-indigo-400" />
           <h1 className="text-2xl font-bold text-gray-100">
             AI 스토리 애니메이션 툴
           </h1>
         </div>
-        <Button onClick={() => navigate("/")}>
-          <ArrowLeft className="w-5 h-5" /> 프로젝트 목록
-        </Button>
+        <Button onClick={() => navigate("/")}>← 프로젝트 목록</Button>
       </header>
 
       {/* 탭 네비게이션 */}
@@ -373,7 +249,7 @@ const ProjectDetail = () => {
               loading={loadingAssets}
               error={assetsError}
               handleToggleLike={handleToggleLike}
-              handleToggleFavorite={handleToggleFavorite}
+              onToggleFavorite={handleToggleFavorite}
               filter={assetFilter}
               setFilter={setAssetFilter}
               activeAssetId={activeAssetId}
@@ -386,21 +262,19 @@ const ProjectDetail = () => {
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
             {/* 왼쪽 패널: 스토리 및 캐릭터 관리 */}
             <div className="flex flex-col gap-8">
-              <StoryInput story={story} setStory={setStory} />
+              <StoryInput
+                story={story}
+                setStory={setStory}
+                trainedAssets={trainedAssets}
+                onCharacterDetected={handleCharacterDetected}
+              />
               <div className="bg-gray-800 rounded-lg p-4">
                 <h3 className="text-lg font-semibold text-gray-100 mb-4">
                   즐겨찾기된 에셋
                 </h3>
                 <TrainedAssetList
-                  assets={trainedAssets.filter((asset) => asset.isFavorite)}
-                  onToggleFavorite={(assetId) => {
-                    const updatedAssets = trainedAssets.map((asset) =>
-                      asset.id === assetId
-                        ? { ...asset, isFavorite: !asset.isFavorite }
-                        : asset
-                    );
-                    setTrainedAssets(updatedAssets);
-                  }}
+                  assets={trainedAssets.filter((a) => a.status === "COMPLETE")}
+                  onToggleFavorite={handleToggleFavorite}
                   simple
                 />
               </div>
@@ -412,6 +286,8 @@ const ProjectDetail = () => {
                 scenes={scenes}
                 onGenerate={generateImageWithLeonardo}
                 generatingScene={generatingScene}
+                detectedCharacter={detectedCharacter}
+                characterData={characterData}
               />
             </div>
           </div>

@@ -1,13 +1,32 @@
 import React from "react";
-import { Clapperboard, Loader, Sparkles, Image } from "./Icons";
 import Button from "./Button";
 import Card from "./Card";
 import CardTitle from "./CardTitle";
 
-const StoryboardViewer = ({ scenes, onGenerate, generatingScene }) => {
+const StoryboardViewer = ({
+  scenes,
+  onGenerate,
+  generatingScene,
+  detectedCharacter,
+  characterData,
+}) => {
   return (
     <Card className="flex-grow">
-      <CardTitle Icon={Clapperboard} title="스토리보드" />
+      <CardTitle title="스토리보드" />
+
+      {/* 캐릭터 감지 정보 표시 */}
+      {detectedCharacter && characterData && (
+        <div className="mb-4 p-3 bg-green-900/20 border border-green-500/50 rounded-lg">
+          <p className="text-sm text-green-300">
+            <span className="font-semibold">감지된 캐릭터:</span>{" "}
+            {detectedCharacter}
+            <span className="text-gray-400 ml-2">
+              (트리거: {characterData.triggerWord})
+            </span>
+          </p>
+        </div>
+      )}
+
       <div className="space-y-6 max-h-[80vh] overflow-y-auto pr-4">
         {scenes.map((scene, index) => (
           <div
@@ -25,18 +44,14 @@ const StoryboardViewer = ({ scenes, onGenerate, generatingScene }) => {
                   </p>
                 </div>
                 <Button
-                  onClick={() => onGenerate(index)}
+                  onClick={() => onGenerate(index, detectedCharacter)}
                   className="w-full mt-4"
                   disabled={generatingScene !== null}
                 >
                   {generatingScene === index ? (
-                    <>
-                      <Loader className="w-5 h-5 animate-spin" /> 생성 중...
-                    </>
+                    <>생성 중...</>
                   ) : (
-                    <>
-                      <Sparkles className="w-5 h-5" /> 이미지 생성
-                    </>
+                    <>이미지 생성</>
                   )}
                 </Button>
               </div>
@@ -45,8 +60,9 @@ const StoryboardViewer = ({ scenes, onGenerate, generatingScene }) => {
               <div className="aspect-w-9 aspect-h-16 bg-gray-900 rounded-lg flex items-center justify-center border border-gray-700 max-h-[400px]">
                 {generatingScene === index && !scene.imageUrl ? (
                   <div className="text-center text-gray-400 h-[400px] flex flex-col items-center justify-center">
-                    <Loader className="w-12 h-12 animate-spin mx-auto mb-2" />
-                    <p>AI가 이미지를 생성하고 있습니다...</p>
+                    <span className="text-lg">
+                      AI가 이미지를 생성하고 있습니다...
+                    </span>
                   </div>
                 ) : scene.imageUrl ? (
                   <img
@@ -60,8 +76,9 @@ const StoryboardViewer = ({ scenes, onGenerate, generatingScene }) => {
                   />
                 ) : (
                   <div className="text-center text-gray-500 h-[400px] flex flex-col items-center justify-center">
-                    <Image className="w-12 h-12 mx-auto mb-2" />
-                    <p>생성된 이미지가 여기에 표시됩니다.</p>
+                    <span className="text-lg">
+                      생성된 이미지가 여기에 표시됩니다.
+                    </span>
                   </div>
                 )}
               </div>

@@ -50,6 +50,28 @@ let trainedAssets = [
     isFavorite: true,
     type: "OBJECT",
   },
+  {
+    id: "asset4",
+    name: "지포맨",
+    instancePrompt: "g_po_man",
+    loraFocus: "CHARACTER",
+    status: "COMPLETE",
+    url: "https://via.placeholder.com/150/FFFF00/000000?text=G-Po-Man",
+    isLiked: false,
+    isFavorite: false,
+    type: "CHARACTER",
+  },
+  {
+    id: "asset5",
+    name: "아쿠아걸",
+    instancePrompt: "aqua_girl",
+    loraFocus: "CHARACTER",
+    status: "COMPLETE",
+    url: "https://via.placeholder.com/150/00FFFF/000000?text=Aqua-Girl",
+    isLiked: false,
+    isFavorite: false,
+    type: "CHARACTER",
+  },
 ];
 
 // Multer 설정: 메모리 스토리지 사용 (파일을 메모리에 임시 저장)
@@ -162,31 +184,46 @@ app.post(
   }
 );
 
+// (NEW) 캐릭터 기반 이미지 생성 엔드포인트
 app.post("/api/generate-image", async (req, res) => {
   try {
-    const { prompt, negative_prompt, init_image_id, userElements } = req.body;
+    const { storyText, characterName } = req.body;
     const apiKey = process.env.LEONARDO_API_KEY;
 
-    // 디버깅: 클라이언트로부터 받은 프롬프트 값 확인
-    console.log("Received for generate-image:", {
-      prompt,
-      negative_prompt,
-      init_image_id,
-      userElements,
-    });
-
-    if (!prompt || prompt.trim() === "") {
-      throw new Error("Prompt is empty or invalid. Cannot generate image.");
+    if (!storyText || storyText.trim() === "") {
+      throw new Error("스토리 텍스트가 비어있습니다.");
     }
 
-    let final_init_image_id = init_image_id; // 클라이언트에서 받은 ID를 그대로 사용
+    // 캐릭터 프롬프트 매핑 (실제 훈련된 LoRA 모델에 맞게 설정)
+    const characterPromptMap = {
+      지포맨: "<lora:g_po_man:0.8>, g_po_man character",
+      아쿠아걸: "<lora:aqua_girl:0.7>, aqua_girl character",
+      엘라라: "<lora:elara_character:0.8>, elara_character",
+      // 추가 캐릭터들은 여기에 추가
+    };
+
+    // 캐릭터 트리거 찾기
+    const characterTrigger = characterName
+      ? characterPromptMap[characterName]
+      : null;
+
+    // 최종 프롬프트 구성
+    let finalPrompt;
+    if (characterTrigger) {
+      finalPrompt = `${characterTrigger}, ${storyText}, cinematic lighting, masterpiece, best quality, 3D Animation Style`;
+    } else {
+      finalPrompt = `${storyText}, cinematic lighting, masterpiece, best quality, 3D Animation Style`;
+    }
+
+    console.log("Final prompt for generation:", finalPrompt);
 
     // Leonardo.ai API 호출
     const response = await axios.post(
       "https://cloud.leonardo.ai/api/rest/v1/generations",
       {
-        prompt,
-        negative_prompt,
+        prompt: finalPrompt,
+        negative_prompt:
+          "blurry, deformed, ugly, bad anatomy, extra limbs, watermark, text, signature",
         modelId: "d69c8273-6b17-4a30-a13e-d6637ae1c644", // 3D Animation Style 모델
         width: 576,
         height: 1024,
@@ -195,10 +232,6 @@ app.post("/api/generate-image", async (req, res) => {
         alchemy: true,
         photoReal: false,
         presetStyle: "ANIME",
-        ...(final_init_image_id && { init_image_id: final_init_image_id }),
-        ...(final_init_image_id && { init_strength: 0.75 }),
-        ...(userElements &&
-          userElements.length > 0 && { userElements: userElements }),
       },
       {
         headers: {
@@ -232,16 +265,24 @@ app.post("/api/generate-image", async (req, res) => {
     }
 
     if (!generatedImageUrl) {
-      throw new Error("Image generation timed out or failed.");
+      throw new Error("이미지 생성이 시간 초과되었거나 실패했습니다.");
     }
 
-    res.json({ imageUrl: generatedImageUrl });
+    res.json({
+      success: true,
+      imageUrl: generatedImageUrl,
+      prompt: finalPrompt,
+      characterName: characterName,
+    });
   } catch (error) {
     console.error(
       "Error generating image:",
       error.response ? error.response.data : error.message
-    ); // 에러 응답 상세 로깅 추가
-    res.status(500).json({ error: error.message });
+    );
+    res.status(500).json({
+      error: error.message,
+      details: error.response ? error.response.data : null,
+    });
   }
 });
 
@@ -389,14 +430,31 @@ app.get("/api/list-elements", async (req, res) => {
 app.post("/api/assets/:id/toggle-like", (req, res) => {
   try {
     const { id } = req.params;
-    const assetIndex = trainedAssets.findIndex((asset) => asset.id === id);
 
-    if (assetIndex > -1) {
-      trainedAssets[assetIndex].isLiked = !trainedAssets[assetIndex].isLiked;
-      res.json({ success: true, asset: trainedAssets[assetIndex] });
-    } else {
-      res.status(404).json({ error: "Asset not found" });
+    // 먼저 인메모리 배열에서 찾기
+    let assetIndex = trainedAssets.findIndex((asset) => asset.id === id);
+
+    if (assetIndex === -1) {
+      // 인메모리 배열에 없으면 새로 추가 (Leonardo API에서 가져온 에셋)
+      const newAsset = {
+        id: id,
+        name: `Asset ${id}`,
+        instancePrompt: `asset_${id}`,
+        loraFocus: "CHARACTER",
+        status: "COMPLETE",
+        url: "https://via.placeholder.com/150/888888/FFFFFF?text=Asset",
+        isLiked: false,
+        isFavorite: false,
+        type: "CHARACTER",
+      };
+
+      trainedAssets.push(newAsset);
+      assetIndex = trainedAssets.length - 1;
     }
+
+    // 좋아요 상태 토글
+    trainedAssets[assetIndex].isLiked = !trainedAssets[assetIndex].isLiked;
+    res.json({ success: true, asset: trainedAssets[assetIndex] });
   } catch (error) {
     console.error("Error toggling like status:", error);
     res.status(500).json({ error: "좋아요 상태 변경 실패." });
@@ -407,15 +465,32 @@ app.post("/api/assets/:id/toggle-like", (req, res) => {
 app.post("/api/assets/:id/toggle-favorite", (req, res) => {
   try {
     const { id } = req.params;
-    const assetIndex = trainedAssets.findIndex((asset) => asset.id === id);
 
-    if (assetIndex > -1) {
-      trainedAssets[assetIndex].isFavorite =
-        !trainedAssets[assetIndex].isFavorite;
-      res.json({ success: true, asset: trainedAssets[assetIndex] });
-    } else {
-      res.status(404).json({ error: "Asset not found" });
+    // 먼저 인메모리 배열에서 찾기
+    let assetIndex = trainedAssets.findIndex((asset) => asset.id === id);
+
+    if (assetIndex === -1) {
+      // 인메모리 배열에 없으면 새로 추가 (Leonardo API에서 가져온 에셋)
+      const newAsset = {
+        id: id,
+        name: `Asset ${id}`,
+        instancePrompt: `asset_${id}`,
+        loraFocus: "CHARACTER",
+        status: "COMPLETE",
+        url: "https://via.placeholder.com/150/888888/FFFFFF?text=Asset",
+        isLiked: false,
+        isFavorite: false,
+        type: "CHARACTER",
+      };
+
+      trainedAssets.push(newAsset);
+      assetIndex = trainedAssets.length - 1;
     }
+
+    // 즐겨찾기 상태 토글
+    trainedAssets[assetIndex].isFavorite =
+      !trainedAssets[assetIndex].isFavorite;
+    res.json({ success: true, asset: trainedAssets[assetIndex] });
   } catch (error) {
     console.error("Error toggling favorite status:", error);
     res.status(500).json({ error: "즐겨찾기 상태 변경 실패." });

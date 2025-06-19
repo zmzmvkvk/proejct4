@@ -1,4 +1,5 @@
 import React from "react";
+import { Star as LucideStar } from "lucide-react";
 
 export const Sparkles = ({ className }) => (
   <svg
@@ -223,3 +224,5 @@ export const ArrowLeft = ({ className }) => (
     <path d="M19 12H5" />
   </svg>
 );
+
+export const Star = LucideStar;

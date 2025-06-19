@@ -1,7 +1,6 @@
 import React, { useState } from "react";
 import Card from "./Card";
 import CardTitle from "./CardTitle";
-import { Sparkles, Loader, PlusCircle } from "./Icons";
 import Input from "./Input";
 import Button from "./Button";
 
@@ -170,7 +169,7 @@ const ImageTrainingForm = ({ fetchTrainedAssets, setErrorMessage }) => {
 
   return (
     <Card>
-      <CardTitle Icon={Sparkles} title="새로운 에셋 학습" />
+      <CardTitle title="새로운 에셋 학습" />
       <p className="text-sm text-gray-400 mb-4">
         캐릭터, 오브젝트, 배경 등 고유한 스타일을 가진 에셋을 학습시켜 이미지
         생성에 활용하세요.
@@ -217,15 +216,7 @@ const ImageTrainingForm = ({ fetchTrainedAssets, setErrorMessage }) => {
           className="w-full"
           disabled={isTraining}
         >
-          {isTraining ? (
-            <>
-              <Loader className="w-5 h-5 animate-spin" /> 학습 중...
-            </>
-          ) : (
-            <>
-              <PlusCircle className="w-5 h-5" /> 학습 시작
-            </>
-          )}
+          {isTraining ? <>학습 중...</> : <>학습 시작</>}
         </Button>
       </div>
     </Card>
