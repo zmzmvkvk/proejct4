@@ -474,28 +474,6 @@ app.post("/api/assets/:id/toggle-like", (req, res) => {
   }
 });
 
-// (NEW) 에셋 즐겨찾기/취소 엔드포인트 (Prisma 기반)
-app.post("/api/assets/:id/toggle-favorite", async (req, res) => {
-  try {
-    const { id } = req.params;
-    // Prisma에서 해당 에셋 조회
-    let asset = await prisma.asset.findUnique({ where: { id } });
-    if (!asset) {
-      // 없으면 404 반환
-      return res.status(404).json({ error: "Asset not found" });
-    }
-    // 즐겨찾기 상태 토글
-    const updated = await prisma.asset.update({
-      where: { id },
-      data: { isFavorite: !asset.isFavorite },
-    });
-    res.json({ success: true, asset: updated });
-  } catch (error) {
-    console.error("Error toggling favorite status:", error);
-    res.status(500).json({ error: "즐겨찾기 상태 변경 실패." });
-  }
-});
-
 // (NEW) Leonardo.ai 데이터셋 생성 엔드포인트
 app.post("/api/create-dataset", async (req, res) => {
   try {
@@ -729,15 +707,21 @@ app.get("/api/projects/:projectId/assets", async (req, res) => {
       const list = response.data.user_loras || [];
       // Firestore에 저장
       for (const element of list) {
+        console.log("element.id:", element.id);
         if (!element.id) continue; // id가 없으면 저장하지 않음
         const assetData = {
           name: element.name,
           triggerWord: element.instancePrompt,
           category: element.focus,
           status: element.status,
-          imageUrl: element.thumbnailUrl,
+          imageUrl:
+            element.thumbnailUrl ||
+            "https://placehold.co/300x300?text=No+Image",
           isFavorite: false,
           userLoraId: element.id,
+          // 원본 필드도 같이 저장 (백업용)
+          instancePrompt: element.instancePrompt,
+          focus: element.focus,
         };
         await assetsRef.doc(element.id).set(assetData);
       }
@@ -836,9 +820,14 @@ app.get("/api/assets", async (req, res) => {
           triggerWord: element.instancePrompt,
           category: element.focus,
           status: element.status,
-          imageUrl: element.thumbnailUrl,
+          imageUrl:
+            element.thumbnailUrl ||
+            "https://placehold.co/300x300?text=No+Image",
           isFavorite: false,
           userLoraId: element.id,
+          // 원본 필드도 같이 저장 (백업용)
+          instancePrompt: element.instancePrompt,
+          focus: element.focus,
         };
         await assetsRef.doc(element.id).set(assetData);
       }
