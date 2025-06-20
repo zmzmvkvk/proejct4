@@ -1,258 +1,344 @@
 import React, { useState, useEffect, useCallback } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useParams, useNavigate } from "react-router-dom";
+import { ArrowLeft, Loader2 } from "lucide-react";
 import Button from "./Button";
-import Card from "./Card";
-import CardTitle from "./CardTitle";
-import Input from "./Input";
-import ErrorModal from "./ErrorModal";
-import StoryInput from "./StoryInput";
-import CharacterManager from "./CharacterManager";
-import StoryboardViewer from "./StoryboardViewer";
-import TrainedAssetList from "./TrainedAssetList";
 import ImageTrainingForm from "./ImageTrainingForm";
+import TrainedAssetList from "./TrainedAssetList";
+import StoryManager from "./StoryManager";
+import * as assetApi from "../services/assetApi";
+import * as projectApi from "../services/projectApi";
+import toast from "../utils/toast";
 
 const ProjectDetail = () => {
-  const navigate = useNavigate();
   const { projectId } = useParams();
+  const navigate = useNavigate();
+
+  // 상태 관리
   const [activeTab, setActiveTab] = useState("training");
-
-  // States for Story/Character/Image Generation
-  const [story, setStory] = useState("");
-  const [characters, setCharacters] = useState([]);
-  const [scenes, setScenes] = useState([]);
-  const [generatingScene, setGeneratingScene] = useState(null);
-  const [errorMessage, setErrorMessage] = useState(null);
-
-  // States for Trained Assets Management
   const [trainedAssets, setTrainedAssets] = useState([]);
-  const [loadingAssets, setLoadingAssets] = useState(true);
-  const [assetsError, setAssetsError] = useState(null);
-  const [assetFilter, setAssetFilter] = useState("all");
-  const [activeAssetId, setActiveAssetId] = useState(null);
+  const [project, setProject] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [previousAssets, setPreviousAssets] = useState([]);
 
-  // Firestore에서 에셋 목록 불러오기 (전역)
-  const fetchTrainedAssets = useCallback(async () => {
+  // 프로젝트 정보 불러오기
+  const fetchProject = useCallback(async () => {
+    if (!projectId) return;
+
     try {
-      setLoadingAssets(true);
-      const response = await fetch(`/api/assets`);
-      if (!response.ok) {
-        throw new Error("에셋을 가져오는데 실패했습니다.");
+      const data = await projectApi.fetchProject(projectId);
+      const projectData = data?.project || data;
+      setProject(projectData);
+    } catch (error) {
+      console.error("Error fetching project:", error);
+      toast.error("프로젝트 정보를 불러오는데 실패했습니다.");
+      // 프로젝트를 찾을 수 없는 경우 홈으로 리다이렉트
+      if (error.message.includes("not found")) {
+        navigate("/");
       }
-      const data = await response.json();
-      setTrainedAssets(data);
-      setAssetsError(null);
-    } catch (err) {
-      setAssetsError(err.message);
-      console.error("Error fetching trained assets:", err);
+    }
+  }, [projectId, navigate]);
+
+  // Leonardo AI에서 직접 에셋 목록 불러오기
+  const fetchTrainedAssets = useCallback(async (showLoading = false) => {
+    try {
+      if (showLoading) setRefreshing(true);
+
+      console.log("🔄 에셋 목록 불러오기 시작...");
+
+      // 직접 Leonardo AI에서 데이터 가져오기
+      console.log("🎯 Leonardo AI에서 직접 데이터 가져오는 중...");
+      const leonardoData = await assetApi.fetchLeonardoElements();
+
+      console.log("📦 Leonardo AI 데이터 받음:", leonardoData);
+
+      if (leonardoData.assets && leonardoData.assets.length > 0) {
+        // 학습 완료된 에셋 체크 (수동 새로고침 시에만)
+        if (showLoading) {
+          const newlyCompletedAssets = leonardoData.assets.filter(
+            (newAsset) => {
+              const previousAsset = previousAssets.find(
+                (prev) => prev.id === newAsset.id
+              );
+              return (
+                previousAsset &&
+                previousAsset.status !== "COMPLETE" &&
+                newAsset.status === "COMPLETE"
+              );
+            }
+          );
+
+          // 새로 완료된 에셋이 있으면 알림
+          newlyCompletedAssets.forEach((asset) => {
+            toast.success(`🎉 "${asset.name}" 에셋 학습이 완료되었습니다!`);
+          });
+        }
+
+        setTrainedAssets(leonardoData.assets);
+        setPreviousAssets(leonardoData.assets);
+
+        if (showLoading) {
+          // 수동 새로고침인 경우에만 메시지 표시
+          toast.success(
+            `Leonardo AI에서 ${leonardoData.assets.length}개의 에셋을 불러왔습니다.`
+          );
+        }
+        console.log("✅ UI에 에셋 설정 완료:", leonardoData.assets);
+      } else {
+        setTrainedAssets([]);
+        setPreviousAssets([]);
+        if (showLoading) {
+          toast.info("Leonardo AI에 학습된 에셋이 없습니다.");
+        }
+      }
+    } catch (error) {
+      console.error("❌ Leonardo AI 에셋 불러오기 실패:", error);
+      toast.error(`에셋 목록을 불러오는데 실패했습니다: ${error.message}`);
+      setTrainedAssets([]);
     } finally {
-      setLoadingAssets(false);
+      if (showLoading) setRefreshing(false);
     }
   }, []);
 
-  // Firestore에 에셋 추가 함수 예시 (필요시 사용)
-  const addAssetToFirestore = async (assetData) => {
-    const res = await fetch(`/api/projects/${projectId}/assets`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(assetData),
-    });
-    if (res.ok) {
-      const newAsset = await res.json();
-      setTrainedAssets((prev) => [...prev, newAsset]);
+  // 즐겨찾기 토글
+  const handleToggleFavorite = useCallback(async (id) => {
+    try {
+      const data = await assetApi.toggleAssetFavorite(id);
+      const updatedAsset = data?.asset || data;
+
+      setTrainedAssets((prevAssets) =>
+        prevAssets.map((asset) =>
+          asset.id === id
+            ? { ...asset, isFavorite: updatedAsset.isFavorite }
+            : asset
+        )
+      );
+
+      toast.success(
+        updatedAsset.isFavorite
+          ? "즐겨찾기에 추가되었습니다."
+          : "즐겨찾기에서 제거되었습니다."
+      );
+    } catch (error) {
+      console.error("Error toggling favorite:", error);
+      toast.error("즐겨찾기 상태 변경에 실패했습니다.");
+    }
+  }, []);
+
+  // 에셋 새로고침
+  const handleRefresh = useCallback(() => {
+    fetchTrainedAssets(true);
+  }, [fetchTrainedAssets]);
+
+  // Leonardo AI 연결 테스트
+  const testLeonardoConnection = async () => {
+    try {
+      setRefreshing(true);
+      console.log("🔍 Leonardo AI 연결 테스트 시작...");
+
+      const response = await fetch("/api/leonardo/health");
+      const data = await response.json();
+
+      console.log("🏥 Leonardo AI Health Check:", data);
+
+      if (data.success) {
+        toast.success(`Leonardo AI 연결 성공! 사용자: ${data.user}`);
+
+        // 실제 elements 가져오기 테스트
+        const elementsResponse = await fetch("/api/leonardo/list-elements");
+        const elementsData = await elementsResponse.json();
+
+        console.log("📋 Leonardo Elements 응답:", elementsData);
+        toast.info(
+          `Leonardo AI에서 ${
+            elementsData.elements?.length || 0
+          }개의 에셋을 찾았습니다.`
+        );
+      } else {
+        toast.error(`Leonardo AI 연결 실패: ${data.error}`);
+      }
+    } catch (error) {
+      console.error("❌ Leonardo AI 연결 테스트 실패:", error);
+      toast.error(`연결 테스트 실패: ${error.message}`);
+    } finally {
+      setRefreshing(false);
     }
   };
 
-  // 즐겨찾기 토글 함수 (전역)
-  const handleToggleFavorite = useCallback(async (id) => {
-    try {
-      const res = await fetch(`/api/assets/${id}/toggle-favorite`, {
-        method: "POST",
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setTrainedAssets((prevAssets) =>
-          prevAssets.map((asset) =>
-            asset.id === id
-              ? { ...asset, isFavorite: data.asset.isFavorite }
-              : asset
-          )
-        );
-      } else {
-        alert("즐겨찾기 상태 변경에 실패했습니다.");
-      }
-    } catch (e) {
-      alert("서버와 통신 중 오류가 발생했습니다.");
-    }
-  }, []);
-
-  // 컴포넌트 마운트 시 에셋 목록 불러오기
+  // 컴포넌트 마운트 시 데이터 불러오기
   useEffect(() => {
-    fetchTrainedAssets();
-  }, [fetchTrainedAssets]);
-
-  // 스토리/에셋 변경 시 장면별 참조 에셋 계산
-  useEffect(() => {
-    const sceneDescriptions = story
-      .split("---")
-      .map((s) => s.trim())
-      .filter(Boolean);
-
-    const favoriteAssets = trainedAssets.filter((asset) => asset.isFavorite);
-
-    setScenes((currentScenes) => {
-      return sceneDescriptions.map((desc, index) => {
-        const existingScene = currentScenes[index];
-        const referencedAssets = favoriteAssets.filter((asset) =>
-          desc.includes(asset.name)
-        );
-        return {
-          description: desc,
-          imageUrl: existingScene?.imageUrl || null,
-          referencedAssets,
-        };
-      });
-    });
-  }, [story, trainedAssets]);
-
-  // 이미지 생성 함수 (참조 에셋 중 첫 번째를 주요 캐릭터로 사용)
-  const generateImageWithLeonardo = useCallback(
-    async (sceneIndex) => {
-      setGeneratingScene(sceneIndex);
+    const loadData = async () => {
+      setLoading(true);
       try {
-        const scene = scenes[sceneIndex];
-        const sceneDescription = scene.description;
-        const primaryAsset =
-          scene.referencedAssets && scene.referencedAssets[0];
-
-        // primaryAsset 정보를 API에 포함해서 전달
-        const response = await fetch("/api/generate-image", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            storyText: sceneDescription,
-            characterName: primaryAsset ? primaryAsset.name : null,
-            triggerWord: primaryAsset ? primaryAsset.triggerWord : null,
-            assetId: primaryAsset ? primaryAsset.id : null,
-          }),
-        });
-
-        if (!response.ok) {
-          const errorBody = await response.text();
-          throw new Error(
-            `이미지 생성 API 오류: ${response.status}\n\n${errorBody}`
-          );
-        }
-
-        const result = await response.json();
-        const generatedImageUrl = result.imageUrl;
-        if (!generatedImageUrl) throw new Error("이미지 생성이 실패했습니다.");
-        setScenes((currentScenes) =>
-          currentScenes.map((s, i) =>
-            i === sceneIndex ? { ...s, imageUrl: generatedImageUrl } : s
-          )
-        );
-      } catch (error) {
-        setErrorMessage(`이미지 생성 중 오류 발생: ${error.message}`);
+        await Promise.all([fetchProject(), fetchTrainedAssets()]);
       } finally {
-        setGeneratingScene(null);
+        setLoading(false);
       }
-    },
-    [scenes]
-  );
+    };
 
-  // TrainedAssetList에 넘길 때 asset 구조 맞추기 (id, name, triggerWord, category, status, imageUrl, isFavorite)
-  const mappedAssets = trainedAssets.map((asset) => ({
-    id: asset.id,
-    name: asset.name,
-    triggerWord: asset.triggerWord || asset.instancePrompt,
-    category: asset.category || asset.focus,
-    status: asset.status,
-    imageUrl: asset.imageUrl || "",
-    isFavorite: asset.isFavorite || false,
-  }));
+    loadData();
+  }, [fetchProject, fetchTrainedAssets]);
+
+  // 자동 새로고침 비활성화 (Leonardo AI API 요청 제한 때문에)
+  // 대신 사용자가 수동으로 새로고침 버튼을 클릭하거나 새 에셋 학습 시에만 업데이트
+  /*
+  useEffect(() => {
+    const hasTrainingAssets = trainedAssets.some(
+      (asset) =>
+        asset.status === "TRAINING" ||
+        asset.status === "PENDING" ||
+        asset.status === "PROCESSING"
+    );
+
+    if (!hasTrainingAssets) return;
+
+    console.log("🔄 학습 중인 에셋이 있어서 자동 새로고침을 시작합니다.");
+
+    const interval = setInterval(() => {
+      console.log("⏰ 자동 새로고침 실행 중...");
+      fetchTrainedAssets(false); // 로딩 스피너 없이 조용히 새로고침
+    }, 60000); // 60초마다 새로고침 (요청 빈도 줄임)
+
+    return () => {
+      console.log("🛑 자동 새로고침을 중단합니다.");
+      clearInterval(interval);
+    };
+  }, [trainedAssets, fetchTrainedAssets]);
+  */
+
+  // 프로젝트 ID가 없는 경우
+  if (!projectId) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <div className="text-center">
+          <h1 className="text-2xl font-bold text-gray-900 mb-4">
+            잘못된 프로젝트 접근
+          </h1>
+          <Button onClick={() => navigate("/")}>홈으로 돌아가기</Button>
+        </div>
+      </div>
+    );
+  }
+
+  // 로딩 중
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <div className="text-center">
+          <Loader2 className="w-12 h-12 animate-spin text-blue-600 mx-auto mb-4" />
+          <p className="text-lg text-gray-600">프로젝트를 불러오는 중...</p>
+        </div>
+      </div>
+    );
+  }
+
+  // 탭 설정 - 캐릭터 관리 제거
+  const tabs = [
+    { id: "training", label: "학습 관리", icon: "🎯" },
+    { id: "story", label: "스토리 & 스토리보드", icon: "🎬" },
+  ];
 
   return (
-    <div className="min-h-screen bg-gray-900 text-white">
-      <header className="bg-gray-800 p-4 shadow-lg flex justify-between items-center border-b border-gray-700">
-        <div className="flex items-center gap-3">
-          <h1 className="text-2xl font-bold text-gray-100">
-            AI 스토리 애니메이션 툴
-          </h1>
+    <div className="min-h-screen bg-gray-50">
+      {/* 헤더 */}
+      <header className="bg-white shadow-sm border-b">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="flex items-center justify-between h-16">
+            <div className="flex items-center space-x-4">
+              <Button
+                variant="ghost"
+                onClick={() => navigate("/")}
+                className="flex items-center space-x-2"
+              >
+                <ArrowLeft className="w-4 h-4" />
+                <span>프로젝트 목록</span>
+              </Button>
+
+              <div className="h-6 border-l border-gray-300" />
+
+              <div>
+                <h1 className="text-xl font-semibold text-gray-900">
+                  {project?.name || "프로젝트"}
+                </h1>
+                {project?.description && (
+                  <p className="text-sm text-gray-500">{project.description}</p>
+                )}
+              </div>
+            </div>
+
+            {/* 새로고침 버튼 */}
+            <div className="flex space-x-2">
+              <Button
+                variant="ghost"
+                onClick={testLeonardoConnection}
+                disabled={refreshing}
+                className="flex items-center space-x-2"
+              >
+                {refreshing ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <span>🔗</span>
+                )}
+                <span>연결테스트</span>
+              </Button>
+
+              <Button
+                variant="ghost"
+                onClick={handleRefresh}
+                disabled={refreshing}
+                className="flex items-center space-x-2"
+              >
+                {refreshing ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <span>🔄</span>
+                )}
+                <span>새로고침</span>
+              </Button>
+            </div>
+          </div>
         </div>
-        <Button onClick={() => navigate("/")}>← 프로젝트 목록</Button>
       </header>
 
       {/* 탭 네비게이션 */}
-      <div className="border-b border-gray-700">
-        <nav className="flex gap-4 px-4">
-          <button
-            onClick={() => setActiveTab("training")}
-            className={`py-4 px-2 border-b-2 ${
-              activeTab === "training"
-                ? "border-indigo-500 text-indigo-400"
-                : "border-transparent text-gray-400 hover:text-gray-300"
-            }`}
-          >
-            학습
-          </button>
-          <button
-            onClick={() => setActiveTab("stories")}
-            className={`py-4 px-2 border-b-2 ${
-              activeTab === "stories"
-                ? "border-indigo-500 text-indigo-400"
-                : "border-transparent text-gray-400 hover:text-gray-300"
-            }`}
-          >
-            스토리
-          </button>
-        </nav>
-      </div>
+      <nav className="bg-white border-b">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="flex space-x-8">
+            {tabs.map((tab) => (
+              <button
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id)}
+                className={`py-4 px-1 border-b-2 font-medium text-sm transition-colors ${
+                  activeTab === tab.id
+                    ? "border-blue-500 text-blue-600"
+                    : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
+                }`}
+              >
+                <span className="mr-2">{tab.icon}</span>
+                {tab.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      </nav>
 
-      {/* 탭 컨텐츠 */}
-      <main className="p-4 sm:p-6 md:p-8">
+      {/* 메인 콘텐츠 */}
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {activeTab === "training" && (
-          <div className="flex flex-col gap-8">
-            <ImageTrainingForm
-              fetchTrainedAssets={fetchTrainedAssets}
-              setErrorMessage={setErrorMessage}
-            />
+          <div className="space-y-8">
+            <ImageTrainingForm onAssetCreated={fetchTrainedAssets} />
             <TrainedAssetList
-              assets={mappedAssets}
+              assets={trainedAssets}
               onToggleFavorite={handleToggleFavorite}
+              onRefresh={handleRefresh}
             />
           </div>
         )}
-        {activeTab === "stories" && (
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-            {/* 왼쪽 패널: 스토리 및 캐릭터 관리 */}
-            <div className="flex flex-col gap-8">
-              <StoryInput story={story} setStory={setStory} />
-              <div className="bg-gray-800 rounded-lg p-4">
-                <h3 className="text-lg font-semibold text-gray-100 mb-4">
-                  즐겨찾기된 에셋
-                </h3>
-                <TrainedAssetList
-                  assets={trainedAssets.filter((asset) => asset.isFavorite)}
-                  onToggleFavorite={handleToggleFavorite}
-                  simple
-                />
-              </div>
-            </div>
-            {/* 오른쪽 패널: 스토리보드 */}
-            <div className="flex flex-col gap-8">
-              <StoryboardViewer
-                scenes={scenes}
-                onGenerate={generateImageWithLeonardo}
-                generatingScene={generatingScene}
-              />
-            </div>
-          </div>
+
+        {activeTab === "story" && (
+          <StoryManager trainedAssets={trainedAssets} />
         )}
       </main>
-      <ErrorModal
-        message={errorMessage}
-        onClose={() => setErrorMessage(null)}
-      />
     </div>
   );
 };
